@@ -1,0 +1,7 @@
+I am working on a chrome extension that does the following:
+1 - Appears at the top right of the chrome tab
+2 - User is able to input their desired mailing service
+3 - When an email comes in that contains a verification code, the popup Appears
+4 -  User are able to press a button on the popup to copy the code. 
+
+623279711257-4fi3g03edbuboqpre6307esu544onk7e.apps.googleusercontent.com
