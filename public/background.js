@@ -225,3 +225,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   })();
   return true;
 });
+
+
+
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg.action === "showCodeOverlay" && sender.tab?.id) {
+    chrome.tabs.sendMessage(sender.tab.id, {
+      action: "displayCode",
+      code: msg.code,
+    });
+  }
+});

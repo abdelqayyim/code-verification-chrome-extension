@@ -56,7 +56,7 @@ function App() {
   useEffect(() => {
     // Clear badge text when popup opens
     chrome.action.setBadgeText({ text: "" });
-    
+
     getAddedServices();
 
     const listener = (msg) => {
@@ -75,7 +75,6 @@ function App() {
   const requestGmailCode = (token) => {
     chrome.runtime.sendMessage({ action: "fetchLatestGmailCode", token });
   };
-
 
   const handleServiceClick = (key) => {
     if (choosingServiceToAdd) {
@@ -129,7 +128,6 @@ const revokeGmailToken = async () => {
     setVerificationData(prev=>startingInfoState);
   });
 };
-
 
   return (
     <div className="w-64 bg-[#21201E] rounded-2xl shadow-2xl p-5 border-2 border-purple-600/30 relative">
