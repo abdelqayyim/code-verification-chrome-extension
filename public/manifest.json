@@ -3,6 +3,7 @@
   "name": "Gmail Verification Helper",
   "version": "1.0",
   "permissions": [
+    "alarms",
       "scripting",
         "activeTab",
     "identity", 
@@ -15,7 +16,8 @@
     "scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "action": {
     "default_popup": "index.html",

@@ -32,10 +32,11 @@ if (!isExtension) {
 
 function App() {
   const startingInfoState = {
-    code: "N/A",
-    service: "N/A",
-    sentDate: "N/A",
-    fetchedDate: "N/A",
+    code: undefined,
+    service: undefined,
+    sentDate: undefined,
+    fetchedDate: undefined,
+    isShown: true
   };
   const [copied, setCopied] = useState(false);
   const [addedServices, setAddedServices] = useState({});
@@ -76,32 +77,54 @@ function App() {
     chrome.runtime.sendMessage({ action: "fetchLatestGmailCode", token });
   };
 
-  const handleServiceClick = (key) => {
-    if (choosingServiceToAdd) {
-      if (key === "gmail") {
-        chrome.identity.getAuthToken({ interactive: true }, (token) => {
-          if (!token) return alert("Authentication failed");
+  // Call this when user clicks "Connect Gmail"
+const allowGmailAccess = async () => {
+  return new Promise((resolve, reject) => {
+    // Ask Chrome for an OAuth token interactively
+    chrome.identity.getAuthToken({ interactive: true }, (token) => {
+      if (chrome.runtime.lastError || !token) {
+        console.error("Gmail authentication failed:", chrome.runtime.lastError);
+        resolve(null);
+        return;
+      }
 
-          chrome.storage.local.set({ gmail_token: token });
-          setAddedServices((prev) => ({ ...prev, gmail: GMAIL_LOGO }));
-          requestGmailCode(token);
-          setChoosingServiceToAdd(false);
-        });
-      } else {
-        alert(`OAuth for ${key} not implemented`);
-      }
+      console.log("Gmail token obtained:", token);
+
+      // Store the token for background use
+      chrome.storage.local.set({ gmail_token: token }, () => {
+        console.log("Gmail token saved to storage");
+        resolve(token);
+      });
+    });
+  });
+};
+
+  const handleServiceClick = async (key) => {
+    if (!choosingServiceToAdd && key === "gmail") {
+      console.log("gmail has been clicked");
+      // Ask background to handle fetching Gmail code
+      chrome.runtime.sendMessage(
+        { action: "fetchLatestGmailCode" },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.error("Error sending message:", chrome.runtime.lastError);
+          } else {
+            console.log("Background responded with code:", response?.code);
+          }
+        }
+      );
     } else {
-      if (key === "gmail") {
-        chrome.storage.local.get("gmail_token", (res) => {
-          const token = res.gmail_token;
-          if (!token) return alert("Authentication required");
-          requestGmailCode(token);
-        });
-      } else {
-        alert(`Clicked on ${key}`);
+      switch (key) {
+        case "gmail":
+          console.log("SHould login Here");
+          allowGmailAccess();
+          break;
+      
+        default:
+          break;
       }
-    }
-  };
+  }
+};
 
 const revokeGmailToken = async () => {
   // Get token from storage first
