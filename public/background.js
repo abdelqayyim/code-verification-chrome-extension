@@ -143,39 +143,31 @@ async function pollGmailVerificationCode() {
 // })();
 
 // Create an alarm to fire every minute
-chrome.alarms.create("pollGmail", { periodInMinutes: 0.5 });
-// Respond to alarm events
+// --- Start polling ---
+function startGmailPolling() {
+  // Stop any previous polling first
+  chrome.alarms.clear("pollGmail", () => {
+    // Create a new alarm to poll every 30 seconds
+    chrome.alarms.create("pollGmail", { periodInMinutes: 0.5 });
+    console.log("Gmail polling started");
+  });
+}
+
+// --- Stop polling ---
+function stopGmailPolling() {
+  chrome.alarms.clear("pollGmail", (wasCleared) => {
+    if (wasCleared) console.log("✅ Gmail polling stopped");
+  });
+}
+
+// --- Alarm listener ---
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "pollGmail") {
     await pollGmailVerificationCode();
   }
 });
 
-
-function startGmailPolling() {
-  // Stop any previous polling if it exists
-  stopGmailPolling();
-
-  gmailPollingIntervalId = setInterval(pollGmailVerificationCode, 30 * 1000);
-}
-
-// Stop polling function
-function stopGmailPolling() {
-  if (gmailPollingIntervalId) {
-    clearInterval(gmailPollingIntervalId);
-    gmailPollingIntervalId = null;
-    console.log("✅ Gmail polling stopped");
-  }
-}
-
-// --- 🚀 Run immediately on startup ---
-chrome.runtime.onStartup.addListener(pollGmailVerificationCode);
-
-(async () => {
-  await pollGmailVerificationCode();
-})();
-
-// --- Listen for popup messages ---
+// --- Popup / App.js message listener ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   (async () => {
     try {
@@ -190,11 +182,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           action: "displayCode",
           code: request.code,
         });
+      } else if (request.action === "startGmailPolling") {
+        startGmailPolling();
+        sendResponse({ status: "started" });
+      } else if (request.action === "stopGmailPolling") {
+        stopGmailPolling();
+        sendResponse({ status: "stopped" });
       }
     } catch (err) {
       console.error("Error in message listener:", err);
       sendResponse({ error: err.message });
     }
   })();
-  return true; // tell Chrome we will respond asynchronously
+
+  return true; // indicate asynchronous response
 });

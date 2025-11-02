@@ -29,14 +29,13 @@ if (!isExtension) {
   };
 }
 
-
 function App() {
   const startingInfoState = {
     code: undefined,
     service: undefined,
     sentDate: undefined,
     fetchedDate: undefined,
-    isShown: true
+    isShown: true,
   };
   const [copied, setCopied] = useState(false);
   const [addedServices, setAddedServices] = useState({});
@@ -52,7 +51,7 @@ function App() {
       setAddedServices(services);
       if (res.verificationCodes) setVerificationData(res.verificationCodes);
     });
-  }
+  };
   // --- Load added services from storage ---
   useEffect(() => {
     // Clear badge text when popup opens
@@ -61,7 +60,8 @@ function App() {
     getAddedServices();
 
     const listener = (msg) => {
-      if (msg.action === "verificationCodeUpdated") setVerificationData(msg.data);
+      if (msg.action === "verificationCodeUpdated")
+        setVerificationData(msg.data);
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
@@ -73,31 +73,32 @@ function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const requestGmailCode = (token) => {
-    chrome.runtime.sendMessage({ action: "fetchLatestGmailCode", token });
-  };
-
   // Call this when user clicks "Connect Gmail"
-const allowGmailAccess = async () => {
-  return new Promise((resolve, reject) => {
-    // Ask Chrome for an OAuth token interactively
-    chrome.identity.getAuthToken({ interactive: true }, (token) => {
-      if (chrome.runtime.lastError || !token) {
-        console.error("Gmail authentication failed:", chrome.runtime.lastError);
-        resolve(null);
-        return;
-      }
+  const allowGmailAccess = async () => {
+    return new Promise((resolve, reject) => {
+      // Ask Chrome for an OAuth token interactively
+      chrome.identity.getAuthToken({ interactive: true }, (token) => {
+        if (chrome.runtime.lastError || !token) {
+          console.error(
+            "Gmail authentication failed:",
+            chrome.runtime.lastError
+          );
+          resolve(null);
+          return;
+        }
 
-      console.log("Gmail token obtained:", token);
+        console.log("Gmail token obtained:", token);
 
-      // Store the token for background use
-      chrome.storage.local.set({ gmail_token: token }, () => {
-        console.log("Gmail token saved to storage");
-        resolve(token);
+        // Store the token for background use
+        chrome.storage.local.set({ gmail_token: token }, () => {
+          console.log("Gmail token saved to storage");
+          // Start Gmail polling after token is stored
+        chrome.runtime.sendMessage({ action: "startGmailPolling" });
+          resolve(token);
+        });
       });
     });
-  });
-};
+  };
 
   const handleServiceClick = async (key) => {
     if (!choosingServiceToAdd && key === "gmail") {
@@ -119,102 +120,85 @@ const allowGmailAccess = async () => {
           console.log("SHould login Here");
           allowGmailAccess();
           break;
-      
+
         default:
           break;
       }
-  }
-};
+    }
+  };
 
-const revokeGmailToken = async () => {
-  // Get token from storage first
-  chrome.storage.local.get("gmail_token", async (res) => {
-    const token = res.gmail_token;
-    if (!token) return;
+  const revokeGmailToken = async () => {
+    // Get token from storage first
+    chrome.storage.local.get("gmail_token", async (res) => {
+      const token = res.gmail_token;
+      if (!token) return;
 
-    // Remove cached token
-    chrome.identity.removeCachedAuthToken({ token }, () => {
-      console.log("Gmail token removed from cache");
+      // Remove cached token
+      chrome.identity.removeCachedAuthToken({ token }, () => {
+        console.log("Gmail token removed from cache");
+      });
+
+      // Revoke token server-side
+      await fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`);
+      console.log("Gmail OAuth revoked");
+
+      // Remove token from storage
+      chrome.storage.local.remove("gmail_token");
+
+      // --- Stop polling by sending message to background.js ---
+      chrome.runtime.sendMessage({ action: "stopGmailPolling" });
+
+
+      getAddedServices();
+      setVerificationData((prev) => startingInfoState);
     });
-
-    // Revoke token server-side
-    await fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`);
-    console.log("Gmail OAuth revoked");
-
-    // Remove token from storage
-    chrome.storage.local.remove("gmail_token");
-
-    // --- Stop polling by sending message to background.js ---
-    chrome.runtime.sendMessage({ action: "stopGmailPolling" });
-
-    getAddedServices();
-    setVerificationData(prev=>startingInfoState);
-  });
-};
+  };
 
   return (
     <div className="w-64 bg-[#21201E] rounded-2xl shadow-2xl p-5 border-2 border-purple-600/30 relative">
       {!choosingServiceToAdd ? (
         <div className="flex flex-col items-center">
-  {/* Dynamically render the service logo */}
-  {(() => {
-    const ServiceLogo = verificationData.service && addedServices[verificationData.service]
-      ? addedServices[verificationData.service]
-      : GMAIL_LOGO; // fallback
-    return <ServiceLogo className="w-16 h-16 mb-2" />;
-  })()}
+          {verificationData.service ? (
+            <div className="flex flex-col items-center w-full">
+              {/* Dynamically render the service logo */}
+              {addedServices[verificationData.service] &&
+                (() => {
+                  const ServiceLogo = addedServices[verificationData.service];
+                  return <ServiceLogo className="w-16 h-16 mb-2" />;
+                })()}
 
-  <p className="text-xs text-gray-400 mb-1">
-    {verificationData.service || "Gmail"}
-  </p>
+              <p className="text-xs text-gray-400 mb-1">
+                {verificationData.service}
+              </p>
 
-  <div
-    onClick={handleCopy}
-    className="bg-[#2A2826] rounded-lg pt-4 mb-4 border border-gray-700 cursor-pointer hover:border-purple-600 transition-colors w-full"
-  >
-    <p className="text-3xl font-mono font-bold text-white tracking-wider text-center">
-      {verificationData.code}
-    </p>
-    <p className="text-xs text-gray-500 mb-3 text-center">
-              Sent: {verificationData.sentDate}
-              {/* | Fetched: {verificationData.fetchedDate} */}
-    </p>
-  </div>
+              <div
+                onClick={handleCopy}
+                className="bg-[#2A2826] rounded-lg pt-4 mb-4 border border-gray-700 cursor-pointer hover:border-purple-600 transition-colors w-full"
+              >
+                <p className="text-3xl font-mono font-bold text-white tracking-wider text-center">
+                  {verificationData.code}
+                </p>
+                <p className="text-xs text-gray-500 mb-3 text-center">
+                  {`Sent: ${verificationData.sentDate}`}
+                </p>
+              </div>
 
-  <button
-    className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg mb-2 transition-colors text-sm"
-    onClick={handleCopy}
-  >
-    {copied ? "✓ Copied!" : "Copy Code"}
-  </button>
+              <button
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg mb-2 transition-colors text-sm"
+                onClick={handleCopy}
+              >
+                {copied ? "✓ Copied!" : "Copy Code"}
+              </button>
+            </div>
+          ) : (
+            <div className="text-white text-center text-lg mb-4">
+              Add a mailing service
+            </div>
+          )}
 
-  <div className="flex -space-x-3 mt-2 items-center">
-    {Object.entries(addedServices).map(([key, Service]) => (
-      <div
-        key={key}
-        className="w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-md"
-      >
-        <Service
-          className="w-10 h-10 rounded-full hover:cursor-pointer"
-          onClick={() => handleServiceClick(key)}
-        />
-      </div>
-    ))}
-
-    <button
-      onClick={() => setChoosingServiceToAdd(true)}
-      className="w-10 h-10 rounded-full border-2 border-white bg-gray-700 text-white flex items-center justify-center hover:bg-gray-600 shadow-md"
-    >
-      +
-    </button>
-  </div>
-</div>
-
-      ) : (
-        <div className="flex flex-col items-center">
-          <div className="text-white">Choose Service to Add</div>
-          <div className="flex flex-row gap-2">
-            {Object.entries(allServices).map(([key, Service]) => (
+          {/* --- Always visible add service button --- */}
+          <div className="flex -space-x-3 mt-2 items-center">
+            {Object.entries(addedServices).map(([key, Service]) => (
               <div
                 key={key}
                 className="w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-md"
@@ -225,6 +209,32 @@ const revokeGmailToken = async () => {
                 />
               </div>
             ))}
+
+            <button
+              onClick={() => setChoosingServiceToAdd(true)}
+              className="w-10 h-10 rounded-full border-2 border-white bg-gray-700 text-white flex items-center justify-center hover:bg-gray-600 shadow-md"
+            >
+              +
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center">
+          <div className="text-white">Choose Service to Add</div>
+          <div className="flex flex-row gap-2">
+            {Object.entries(allServices)
+  .filter(([key]) => !addedServices[key]) // <-- only show services not already added
+  .map(([key, Service]) => (
+    <div
+      key={key}
+      className="w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-md"
+    >
+      <Service
+        className="w-10 h-10 rounded-full hover:cursor-pointer"
+        onClick={() => handleServiceClick(key)}
+      />
+    </div>
+  ))}
           </div>
           <div className="flex -space-x-3 mt-2 items-center">
             <button
@@ -238,18 +248,17 @@ const revokeGmailToken = async () => {
       )}
 
       <button
-  onClick={() => {
-    revokeGmailToken();
-    chrome.storage.local.clear(() => {
-      console.log("✅ Extension storage cleared");
-      alert("Extension storage cleared!");
-    });
-  }}
-  className="w-32 mt-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm transition-colors"
->
-  Clear Storage & Revoke Gmail
-</button>
-
+        onClick={() => {
+          revokeGmailToken();
+          chrome.storage.local.clear(() => {
+            console.log("✅ Extension storage cleared");
+            alert("Extension storage cleared!");
+          });
+        }}
+        className="w-32 mt-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm transition-colors"
+      >
+        Clear Storage & Revoke Gmail
+      </button>
     </div>
   );
 }
