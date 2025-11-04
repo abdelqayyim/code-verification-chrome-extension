@@ -56,6 +56,8 @@ function closeOverlay() {
       chrome.storage.local.set({ verificationCodes: updated });
     }
   });
+  // Remove badge is there is one
+  chrome.runtime.sendMessage({ action: "resetBadge" });
 }
 
 function showOverlay(codeData, inputElement, mousePos = null) {

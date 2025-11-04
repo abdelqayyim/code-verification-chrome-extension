@@ -1,26 +1,49 @@
 // background.js
-let gmailPollingIntervalId = null;
-// --- Helper: Fetch verification code from Gmail ---
-async function fetchLatestGmailCode() {
-  try {
-    console.log("fetching gmail latest");
-    // --- Get stored token ---
-    let { gmail_token: token } = await chrome.storage.local.get("gmail_token");
-    
-    // --- Get new token if missing ---
-    if (!token) {
-      console.log("No stored Gmail token, requesting new one...");
-      token = await getValidGmailToken(); // make sure this returns a token or null
-      if (!token) {
-        console.warn("User not authenticated yet — stopping fetch.");
-        return null;
+
+// --- Alarm/interval constants ---
+const POLL_INTERVAL_MINUTES = 0.5; // 30 seconds
+
+// --- Helper: promisified storage access ---
+const getFromStorage = (key) => new Promise(resolve =>
+  chrome.storage.local.get(key, (res) => resolve(res[key]))
+);
+const setInStorage = (key, value) => new Promise(resolve =>
+  chrome.storage.local.set({ [key]: value }, () => resolve())
+);
+
+// --- Badge helpers ---
+const resetBadge = () => chrome.action.setBadgeText({ text: "" });
+const addBadge = (textObj, colorObj) => {
+  chrome.action.setBadgeText(textObj);
+  chrome.action.setBadgeBackgroundColor(colorObj);
+};
+
+// --- Gmail token helpers ---
+const getStoredGmailToken = async () => await getFromStorage("gmail_token");
+
+const getValidGmailToken = async (interactive = false) => {
+  return new Promise((resolve) => {
+    chrome.identity.getAuthToken({ interactive }, (token) => {
+      if (chrome.runtime.lastError || !token) {
+        console.warn("No valid token available.");
+        resolve(null);
+      } else {
+        resolve(token);
       }
-      await chrome.storage.local.set({ gmail_token: token });
+    });
+  });
+};
+
+// --- Fetch latest Gmail verification code ---
+async function fetchLatestGmailCode(token) {
+  try {
+    console.log("Fetching Gmail latest verification code...");
+
+    if (!token) {
+      console.warn("No Gmail token available.");
+      return null;
     }
 
-    console.log("Using Gmail token:", token);
-
-    // --- Fetch messages ---
     const searchQuery = encodeURIComponent("verification code");
     const res = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${searchQuery}`,
@@ -40,18 +63,12 @@ async function fetchLatestGmailCode() {
     );
     const msgData = await msgRes.json();
 
-    // --- Decode message ---
-    const decodeBase64Url = (str) =>
-      atob(str.replace(/-/g, "+").replace(/_/g, "/"));
-
+    // --- Decode Base64 message ---
+    const decodeBase64Url = (str) => atob(str.replace(/-/g, "+").replace(/_/g, "/"));
     const extractText = (payload) => {
       let text = "";
       if (payload.body?.data) text += decodeBase64Url(payload.body.data);
-      if (payload.parts?.length) {
-        for (const part of payload.parts) {
-          text += extractText(part);
-        }
-      }
+      if (payload.parts?.length) payload.parts.forEach(p => text += extractText(p));
       return text;
     };
 
@@ -67,10 +84,10 @@ async function fetchLatestGmailCode() {
     const code = match[0];
     const service = "gmail";
 
-    // --- Save if new code ---
-    const storedData = await chrome.storage.local.get("verificationCodes");
-    const previous = storedData.verificationCodes || {};
+    // --- Store verification code if new ---
+    const previous = await getFromStorage("verificationCodes") || {};
     if (previous.code !== code) {
+      console.log("New verification code from gmail");
       const verificationCodes = {
         service,
         code,
@@ -78,17 +95,14 @@ async function fetchLatestGmailCode() {
         fetchedDate: new Date().toLocaleString(),
         isShown: false,
       };
-      await chrome.storage.local.set({ verificationCodes });
+      await setInStorage("verificationCodes", verificationCodes);
 
-      // Notify popup / update badge / notifications
       chrome.runtime.sendMessage({
         action: "verificationCodeUpdated",
         data: verificationCodes,
       });
-      chrome.action.setBadgeText({ text: "NEW" });
-      chrome.action.setBadgeBackgroundColor({ color: "#4caf50" });
-    } else {
-      console.log("Code unchanged, skipping update.");
+
+      addBadge({ text: "NEW" }, { color: "#4caf50" });
     }
 
     return code;
@@ -98,62 +112,32 @@ async function fetchLatestGmailCode() {
   }
 }
 
-
-
-// --- Helper: Get or refresh Gmail token ---
-async function getValidGmailToken() {
-  return new Promise((resolve) => {
-    chrome.identity.getAuthToken({ interactive: false }, (token) => {
-      if (chrome.runtime.lastError || !token) {
-        console.warn("No valid token available, user interaction required.");
-        resolve(null);
-      } else {
-        resolve(token);
-      }
-    });
-  });
-}
-
 // --- Polling function ---
 async function pollGmailVerificationCode() {
-  const { gmail_token: storedToken } =
-    await chrome.storage.local.get("gmail_token");
-
-  let token = storedToken;
+  let token = await getStoredGmailToken();
 
   if (!token) {
-    console.log("No stored Gmail token, trying to get a new one...");
-    token = await getValidGmailToken();
-    if (token) {
-      await chrome.storage.local.set({ gmail_token: token });
-    } else {
-      console.warn("User not authenticated yet — Stopping polling Until Authenticated.");
+    // Try silent retrieval (non-interactive)
+    token = await getValidGmailToken(false);
+    if (!token) {
+      console.warn("User not authenticated yet. Stopping polling.");
       stopGmailPolling();
       return;
     }
+    await setInStorage("gmail_token", token);
   }
 
-  await fetchLatestGmailCode();
+  await fetchLatestGmailCode(token);
 }
 
-// // --- 🔄 Run polling every 30 seconds ---
-// (async () => {
-//   await pollGmailVerificationCode();
-//   startGmailPolling(); // start repeating every 30s
-// })();
-
-// Create an alarm to fire every minute
-// --- Start polling ---
+// --- Polling control ---
 function startGmailPolling() {
-  // Stop any previous polling first
   chrome.alarms.clear("pollGmail", () => {
-    // Create a new alarm to poll every 30 seconds
-    chrome.alarms.create("pollGmail", { periodInMinutes: 0.5 });
-    console.log("Gmail polling started");
+    chrome.alarms.create("pollGmail", { periodInMinutes: POLL_INTERVAL_MINUTES });
+    console.log("✅ Gmail polling started");
   });
 }
 
-// --- Stop polling ---
 function stopGmailPolling() {
   chrome.alarms.clear("pollGmail", (wasCleared) => {
     if (wasCleared) console.log("✅ Gmail polling stopped");
@@ -167,27 +151,25 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
-// --- Popup / App.js message listener ---
+// --- Message listener ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   (async () => {
     try {
       if (request.action === "fetchLatestGmailCode") {
-        const code = await fetchLatestGmailCode();
+        const token = await getStoredGmailToken();
+        const code = await fetchLatestGmailCode(token);
         sendResponse({ code });
       } else if (request.action === "getValidGmailToken") {
-        const token = await getValidGmailToken();
+        const token = await getValidGmailToken(true);
         sendResponse({ token });
-      } else if (request.action === "showCodeOverlay" && sender.tab?.id) {
-        chrome.tabs.sendMessage(sender.tab.id, {
-          action: "displayCode",
-          code: request.code,
-        });
       } else if (request.action === "startGmailPolling") {
         startGmailPolling();
         sendResponse({ status: "started" });
       } else if (request.action === "stopGmailPolling") {
         stopGmailPolling();
         sendResponse({ status: "stopped" });
+      } else if (request.action === "resetBadge") {
+        resetBadge();
       }
     } catch (err) {
       console.error("Error in message listener:", err);
@@ -195,5 +177,5 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
   })();
 
-  return true; // indicate asynchronous response
+  return true; // Keep sendResponse async
 });

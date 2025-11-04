@@ -5,3 +5,16 @@ I am working on a chrome extension that does the following:
 4 -  User are able to press a button on the popup to copy the code. 
 
 623279711257-4fi3g03edbuboqpre6307esu544onk7e.apps.googleusercontent.com
+
+
+
+[ Gmail / Outlook ]  --->  [ AWS API Gateway (HTTPS Endpoint) ]
+                                 |
+                                 ▼
+                       [ AWS Lambda Function ]
+                                 |
+                                 ▼
+                        [ DynamoDB (store user tokens, metadata) ]
+                                 |
+                                 ▼
+                    [ Chrome Extension (polls or receives data) ]
